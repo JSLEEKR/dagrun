@@ -149,17 +149,27 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 			// Process dependents
 			dependents := r.graph.Dependents[event.name]
 			for _, depName := range dependents {
+				// Skip if already completed
+				r.mu.RLock()
+				_, alreadyDone := r.results[depName]
+				r.mu.RUnlock()
+				if alreadyDone {
+					continue
+				}
+
 				if r.isReady(depName) {
 					readyCh <- depName
 				} else if r.shouldSkip(depName) {
 					// Cascade skip
 					r.mu.Lock()
-					r.results[depName] = &model.NodeResult{
-						Name:   depName,
-						Status: model.NodeSkipped,
+					if _, done := r.results[depName]; !done {
+						r.results[depName] = &model.NodeResult{
+							Name:   depName,
+							Status: model.NodeSkipped,
+						}
+						completed++
 					}
 					r.mu.Unlock()
-					completed++
 					// Cascade further
 					r.cascadeSkip(depName, &completed)
 				}
