@@ -1,0 +1,22 @@
+name: retry-demo
+description: Demonstrates retry with exponential backoff
+
+steps:
+  - name: stable-step
+    command: echo "This always works"
+
+  - name: flaky-service
+    command: echo "Calling flaky service..."
+    depends:
+      - stable-step
+    retry_policy:
+      limit: 3
+      interval_sec: 1
+      backoff: 2.0
+    continue_on:
+      failure: true
+
+  - name: final-report
+    command: echo "Generating report regardless of flaky service..."
+    depends:
+      - flaky-service

@@ -1,0 +1,43 @@
+name: diamond-pipeline
+description: Classic diamond DAG pattern showing parallel execution
+
+env:
+  BUILD_DIR: /tmp/build
+
+steps:
+  - name: checkout
+    command: echo "Checking out source code..."
+
+  - name: build-frontend
+    command: echo "Building frontend..."
+    depends:
+      - checkout
+
+  - name: build-backend
+    command: echo "Building backend..."
+    depends:
+      - checkout
+
+  - name: test-frontend
+    command: echo "Testing frontend..."
+    depends:
+      - build-frontend
+
+  - name: test-backend
+    command: echo "Testing backend..."
+    depends:
+      - build-backend
+
+  - name: deploy
+    command: echo "Deploying both services..."
+    depends:
+      - test-frontend
+      - test-backend
+
+handler_on:
+  success:
+    name: notify-success
+    command: echo "Pipeline completed successfully!"
+  failure:
+    name: notify-failure
+    command: echo "Pipeline FAILED!"
