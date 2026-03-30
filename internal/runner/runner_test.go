@@ -560,3 +560,76 @@ func TestRunEmptyDAGName(t *testing.T) {
 		t.Errorf("status = %v", result.Status)
 	}
 }
+
+func TestRunInheritDAGShell(t *testing.T) {
+	skipWindows(t)
+	d := &model.DAG{
+		Name:  "inherit-shell",
+		Shell: "bash",
+		Steps: []model.Step{
+			{Name: "uses-dag-shell", Command: "echo $BASH_VERSION"},
+		},
+	}
+	result := buildAndRun(t, d)
+	if result.Status != model.NodeSucceeded {
+		t.Errorf("status = %v, want succeeded", result.Status)
+	}
+	// The step should have run with bash (inheriting from DAG level)
+	if result.Nodes[0].Output == "" {
+		t.Error("expected non-empty output from bash (BASH_VERSION should be set)")
+	}
+}
+
+func TestRunInheritDAGWorkingDir(t *testing.T) {
+	skipWindows(t)
+	d := &model.DAG{
+		Name:       "inherit-workdir",
+		WorkingDir: "/tmp",
+		Steps: []model.Step{
+			{Name: "uses-dag-dir", Command: "pwd"},
+		},
+	}
+	result := buildAndRun(t, d)
+	if result.Status != model.NodeSucceeded {
+		t.Errorf("status = %v, want succeeded", result.Status)
+	}
+	// On macOS/Linux, /tmp may resolve to /private/tmp
+	output := result.Nodes[0].Output
+	if !strings.Contains(output, "tmp") {
+		t.Errorf("output = %q, want to contain 'tmp' (working dir should be /tmp)", output)
+	}
+}
+
+func TestRunStepOverridesDAGShell(t *testing.T) {
+	skipWindows(t)
+	// Step-level shell should override DAG-level
+	d := &model.DAG{
+		Name:  "override-shell",
+		Shell: "bash",
+		Steps: []model.Step{
+			{Name: "uses-step-shell", Command: "echo ok", Shell: "sh"},
+		},
+	}
+	result := buildAndRun(t, d)
+	if result.Status != model.NodeSucceeded {
+		t.Errorf("status = %v, want succeeded", result.Status)
+	}
+}
+
+func TestRunStepOverridesDAGWorkingDir(t *testing.T) {
+	skipWindows(t)
+	d := &model.DAG{
+		Name:       "override-workdir",
+		WorkingDir: "/tmp",
+		Steps: []model.Step{
+			{Name: "uses-step-dir", Command: "pwd", WorkingDir: "/"},
+		},
+	}
+	result := buildAndRun(t, d)
+	if result.Status != model.NodeSucceeded {
+		t.Errorf("status = %v, want succeeded", result.Status)
+	}
+	if result.Nodes[0].Output != "/" {
+		t.Errorf("output = %q, want '/' (step working_dir should override DAG)", result.Nodes[0].Output)
+	}
+}

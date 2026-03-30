@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -129,7 +130,7 @@ func TestDAGResultSummary(t *testing.T) {
 	}
 	// Should contain key info
 	for _, want := range []string{"test-dag", "succeeded", "total=4", "succeeded=2", "failed=1", "skipped=1"} {
-		if !contains(summary, want) {
+		if !strings.Contains(summary, want) {
 			t.Errorf("Summary() missing %q: %s", want, summary)
 		}
 	}
@@ -145,7 +146,7 @@ func TestDAGResultSummaryWithTimedOut(t *testing.T) {
 		},
 	}
 	summary := dr.Summary()
-	if !contains(summary, "failed=1") || !contains(summary, "skipped=1") {
+	if !strings.Contains(summary, "failed=1") || !strings.Contains(summary, "aborted=1") {
 		t.Errorf("Summary() = %s", summary)
 	}
 }
@@ -171,19 +172,6 @@ func TestStepResolveType(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && containsStr(s, sub)
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 func TestPreconditionFields(t *testing.T) {

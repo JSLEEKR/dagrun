@@ -130,6 +130,7 @@ func (a *App) cmdRun(args []string) int {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh) // M5: prevent goroutine leak
 	go func() {
 		<-sigCh
 		if *verbose {
@@ -378,8 +379,10 @@ func statusIcon(s model.NodeStatus) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	// L6: Use rune count instead of byte length
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max] + "..."
+	return string(runes[:max]) + "..."
 }

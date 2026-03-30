@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/JSLEEKR/dagrun/internal/model"
@@ -314,7 +315,7 @@ func parseMapping(lines []string, start, indent int) (interface{}, int, error) {
 		}
 
 		// Parse key: value
-		colonIdx := strings.Index(trimmed, ":")
+		colonIdx := findUnquotedColon(trimmed)
 		if colonIdx < 0 {
 			i++
 			continue
@@ -410,7 +411,7 @@ func parseSequence(lines []string, start, indent int) ([]interface{}, int, error
 		itemStr = strings.TrimSpace(itemStr)
 
 		// Check if item is a mapping (has colon)
-		if colonIdx := strings.Index(itemStr, ":"); colonIdx >= 0 {
+		if colonIdx := findUnquotedColon(itemStr); colonIdx >= 0 {
 			// Item is a mapping - parse it
 			itemMap := make(map[string]interface{})
 			key := strings.TrimSpace(itemStr[:colonIdx])
@@ -455,8 +456,21 @@ func parseSequence(lines []string, start, indent int) ([]interface{}, int, error
 				i++
 			}
 
-			// Parse remaining keys at the same item level (indent + 2)
-			itemIndent := indent + 2
+			// Parse remaining keys at the same item level
+			// Detect actual indent from next non-empty non-comment line
+			itemIndent := indent + 2 // default fallback
+			for peekI := i; peekI < len(lines); peekI++ {
+				peekLine := lines[peekI]
+				peekTrimmed := strings.TrimSpace(peekLine)
+				if peekTrimmed == "" || strings.HasPrefix(peekTrimmed, "#") {
+					continue
+				}
+				peekIndent := countIndent(peekLine)
+				if peekIndent > indent && !strings.HasPrefix(peekTrimmed, "- ") {
+					itemIndent = peekIndent
+				}
+				break
+			}
 			for i < len(lines) {
 				nextLine := lines[i]
 				nextTrimmed := strings.TrimSpace(nextLine)
@@ -475,7 +489,7 @@ func parseSequence(lines []string, start, indent int) ([]interface{}, int, error
 					break
 				}
 
-				cIdx := strings.Index(nextTrimmed, ":")
+				cIdx := findUnquotedColon(nextTrimmed)
 				if cIdx < 0 {
 					i++
 					continue
@@ -579,8 +593,10 @@ func parseMultiLine(lines []string, start, baseIndent int) (string, int) {
 // parseScalar converts a string to appropriate Go type.
 func parseScalar(s string) interface{} {
 	// Remove quotes
-	if (strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"")) ||
-		(strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'")) {
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
+		return processEscapes(s[1 : len(s)-1])
+	}
+	if strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'") {
 		return s[1 : len(s)-1]
 	}
 
@@ -593,27 +609,19 @@ func parseScalar(s string) interface{} {
 		return false
 	}
 
-	// Null
+	// Null — return empty string to avoid "<nil>" stringification (L3)
 	if lower == "null" || lower == "~" {
-		return nil
+		return ""
 	}
 
-	// Integer
+	// Integer — use strconv.Atoi to avoid overflow (M7)
 	if isInteger(s) {
-		n := 0
-		negative := false
-		start := 0
-		if s[0] == '-' {
-			negative = true
-			start = 1
+		n, err := strconv.Atoi(s)
+		if err == nil {
+			return n
 		}
-		for _, c := range s[start:] {
-			n = n*10 + int(c-'0')
-		}
-		if negative {
-			n = -n
-		}
-		return n
+		// If overflow, return as string
+		return s
 	}
 
 	// Float
@@ -624,6 +632,38 @@ func parseScalar(s string) interface{} {
 	}
 
 	return s
+}
+
+// processEscapes handles escape sequences in double-quoted strings (H2).
+func processEscapes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+				i++
+			case 't':
+				b.WriteByte('\t')
+				i++
+			case '\\':
+				b.WriteByte('\\')
+				i++
+			case '"':
+				b.WriteByte('"')
+				i++
+			case 'r':
+				b.WriteByte('\r')
+				i++
+			default:
+				b.WriteByte(s[i])
+			}
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 func isInteger(s string) bool {
@@ -694,10 +734,19 @@ func findNextNonEmpty(lines []string, start int) int {
 }
 
 func removeInlineComment(s string) string {
-	// Don't remove # inside quotes
+	// Don't remove # inside quotes; handle escaped quotes (M3)
 	inSingle := false
 	inDouble := false
+	escaped := false
 	for i, c := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
 		switch c {
 		case '\'':
 			if !inDouble {
@@ -714,4 +763,36 @@ func removeInlineComment(s string) string {
 		}
 	}
 	return s
+}
+
+// findUnquotedColon finds the first colon NOT inside quotes (H1).
+func findUnquotedColon(s string) int {
+	inSingle := false
+	inDouble := false
+	escaped := false
+	for i, c := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		switch c {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case ':':
+			if !inSingle && !inDouble {
+				return i
+			}
+		}
+	}
+	return -1
 }

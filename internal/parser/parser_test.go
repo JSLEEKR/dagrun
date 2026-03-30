@@ -515,10 +515,10 @@ steps:
 
 func TestParseInvalidYAML(t *testing.T) {
 	yaml := `{{{{invalid yaml`
-	_, err := Parse([]byte(yaml))
-	// Should either error or produce an empty/invalid result
-	if err == nil {
-		t.Log("no error for invalid yaml (parser is lenient)")
+	dag, err := Parse([]byte(yaml))
+	// L1: Invalid YAML must either error or produce an invalid DAG (no steps)
+	if err == nil && dag != nil && len(dag.Steps) > 0 {
+		t.Error("invalid YAML should not produce a valid DAG with steps")
 	}
 }
 
@@ -534,8 +534,8 @@ func TestParseScalarTypes(t *testing.T) {
 		{"42", 42},
 		{"-5", -5},
 		{"3.14", 3.14},
-		{"null", nil},
-		{"~", nil},
+		{"null", ""},
+		{"~", ""},
 		{"hello", "hello"},
 		{`"quoted"`, "quoted"},
 		{`'single'`, "single"},

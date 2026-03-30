@@ -180,17 +180,19 @@ func (r DAGResult) Duration() time.Duration {
 
 // Summary returns a formatted summary of the DAG execution.
 func (r DAGResult) Summary() string {
-	succeeded, failed, skipped := 0, 0, 0
+	succeeded, failed, skipped, aborted := 0, 0, 0, 0
 	for _, n := range r.Nodes {
 		switch n.Status {
 		case NodeSucceeded:
 			succeeded++
 		case NodeFailed, NodeTimedOut:
 			failed++
-		case NodeSkipped, NodeAborted:
+		case NodeSkipped:
 			skipped++
+		case NodeAborted:
+			aborted++
 		}
 	}
-	return fmt.Sprintf("DAG %q: %s (total=%d succeeded=%d failed=%d skipped=%d duration=%s)",
-		r.Name, r.Status, len(r.Nodes), succeeded, failed, skipped, r.Duration().Round(time.Millisecond))
+	return fmt.Sprintf("DAG %q: %s (total=%d succeeded=%d failed=%d skipped=%d aborted=%d duration=%s)",
+		r.Name, r.Status, len(r.Nodes), succeeded, failed, skipped, aborted, r.Duration().Round(time.Millisecond))
 }

@@ -1,8 +1,8 @@
 # dagrun
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-164-blue?style=for-the-badge)](https://github.com/JSLEEKR/dagrun)
+[![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-168-blue?style=for-the-badge)](https://github.com/JSLEEKR/dagrun)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen?style=for-the-badge)](go.mod)
 
 A lightweight DAG (Directed Acyclic Graph) workflow runner for defining and executing multi-step workflows with dependency resolution. Define workflows in YAML, and dagrun handles parallel execution, dependency ordering, retries, and error propagation.
@@ -20,7 +20,7 @@ A lightweight DAG (Directed Acyclic Graph) workflow runner for defining and exec
 | Feature | dagu | dagrun |
 |---------|------|--------|
 | Dependencies | 60+ | **0** (stdlib only) |
-| License | GPL-3.0 | **MIT** |
+| License | GPL-3.0 | **GPL-3.0** |
 | Binary size | Large (Docker, Tailscale, etc.) | **Minimal** |
 | Executor types | 19+ | **3** (command, HTTP, script) |
 | Web UI | Yes | No (CLI-focused) |
@@ -578,11 +578,10 @@ When using `-json` flag, results are output as structured JSON:
 - Git sync
 - 19+ executor types (keeping only 3)
 - 60+ external dependencies (keeping 0)
-- GPL-3.0 license (using MIT instead)
+- 60+ external dependencies
 
 ### What dagrun improves
 - **Zero dependencies**: Go stdlib only
-- **MIT license**: Commercial-friendly
 - **Focused scope**: DAG execution, nothing else
 - **Better error tracing**: Per-step timing, exit codes, retry counts
 - **Smaller attack surface**: No external deps = no supply chain risk
@@ -611,11 +610,18 @@ go test ./... -v
 go vet ./...
 ```
 
+> **Note (Windows):** Many tests invoke shell commands via `sh -c` and will be
+> skipped automatically on Windows (`t.Skip`). Run the full suite on Linux/macOS
+> for complete coverage.
+
+> **Note (go.sum):** This project has zero external dependencies (stdlib only),
+> so there is no `go.sum` file. This is expected.
+
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+GPL-3.0 License - see [LICENSE](LICENSE) for details.
 
 ---
 

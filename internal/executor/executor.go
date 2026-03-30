@@ -43,10 +43,27 @@ func New(stepType string) (Executor, error) {
 }
 
 // buildEnv merges environment variables into os.Environ format.
+// Deduplicates by replacing existing keys instead of appending (H4).
 func buildEnv(env map[string]string) []string {
 	osEnv := os.Environ()
+	if len(env) == 0 {
+		return osEnv
+	}
+	// Build index of existing keys for O(1) lookup
+	keyIndex := make(map[string]int, len(osEnv))
+	for i, e := range osEnv {
+		if idx := strings.IndexByte(e, '='); idx >= 0 {
+			keyIndex[strings.ToUpper(e[:idx])] = i
+		}
+	}
 	for k, v := range env {
-		osEnv = append(osEnv, k+"="+v)
+		entry := k + "=" + v
+		if idx, exists := keyIndex[strings.ToUpper(k)]; exists {
+			osEnv[idx] = entry
+		} else {
+			osEnv = append(osEnv, entry)
+			keyIndex[strings.ToUpper(k)] = len(osEnv) - 1
+		}
 	}
 	return osEnv
 }
@@ -176,7 +193,8 @@ func (e *HTTPExecutor) Execute(ctx context.Context, step model.Step, env map[str
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// M6: Limit response body to 10MB to prevent OOM
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return Result{Error: fmt.Errorf("step %q: failed to read response: %w", step.Name, err)}
 	}
@@ -221,23 +239,24 @@ func (e *ScriptExecutor) Execute(ctx context.Context, step model.Step, env map[s
 	if err != nil {
 		return Result{Error: fmt.Errorf("step %q: failed to create temp file: %w", step.Name, err)}
 	}
-	defer os.Remove(tmpFile.Name())
+	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.WriteString(step.Script); err != nil {
 		tmpFile.Close()
+		os.Remove(tmpPath)
 		return Result{Error: fmt.Errorf("step %q: failed to write script: %w", step.Name, err)}
 	}
 	tmpFile.Close()
 
 	if runtime.GOOS != "windows" {
-		os.Chmod(tmpFile.Name(), 0o755)
+		os.Chmod(tmpPath, 0o700) // H5: restrict permissions
 	}
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" && (shell == "cmd" || shell == "cmd.exe") {
-		cmd = exec.CommandContext(ctx, "cmd", "/C", tmpFile.Name())
+		cmd = exec.CommandContext(ctx, "cmd", "/C", tmpPath)
 	} else {
-		cmd = exec.CommandContext(ctx, shell, tmpFile.Name())
+		cmd = exec.CommandContext(ctx, shell, tmpPath)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -249,6 +268,8 @@ func (e *ScriptExecutor) Execute(ctx context.Context, step model.Step, env map[s
 	}
 
 	err = cmd.Run()
+	// H5: Remove temp file AFTER cmd.Run completes
+	os.Remove(tmpPath)
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

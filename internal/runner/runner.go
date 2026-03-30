@@ -24,6 +24,7 @@ type Runner struct {
 	results   map[string]*model.NodeResult
 	mu        sync.RWMutex
 	maxActive int
+	completed int // protected by mu (H3/M4)
 }
 
 // New creates a new Runner for the given DAG.
@@ -44,9 +45,10 @@ func New(d *model.DAG, g *dag.Graph) *Runner {
 	}
 
 	maxActive := d.MaxActive
-	if maxActive <= 0 {
-		maxActive = 0 // unlimited
+	if maxActive < 0 {
+		maxActive = 1 // L8: clamp negative values to 1
 	}
+	// maxActive == 0 means unlimited
 
 	return &Runner{
 		dag:       d,
@@ -87,7 +89,9 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 	}
 
 	var wg sync.WaitGroup
-	completed := 0
+	r.mu.Lock()
+	r.completed = 0
+	r.mu.Unlock()
 	active := 0
 	total := len(r.graph.Nodes)
 
@@ -95,7 +99,14 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 	var pendingQueue []string
 
 	// Event loop
-	for completed < total {
+	for {
+		r.mu.RLock()
+		done := r.completed >= total
+		r.mu.RUnlock()
+		if done {
+			break
+		}
+
 		select {
 		case <-ctx.Done():
 			// Context cancelled or timed out — abort remaining
@@ -107,7 +118,7 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 						Status: model.NodeAborted,
 						Error:  ctx.Err(),
 					}
-					completed++
+					r.completed++
 				}
 			}
 			r.mu.Unlock()
@@ -132,9 +143,8 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 
 		case event := <-doneCh:
 			active--
-			completed++
-
 			r.mu.Lock()
+			r.completed++
 			r.results[event.name] = &event.result
 
 			// Capture output as env variable
@@ -167,11 +177,11 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 							Name:   depName,
 							Status: model.NodeSkipped,
 						}
-						completed++
+						r.completed++
 					}
 					r.mu.Unlock()
 					// Cascade further
-					r.cascadeSkip(depName, &completed)
+					r.cascadeSkip(depName)
 				}
 			}
 
@@ -189,8 +199,11 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 				}(next)
 			}
 
-			// Deadlock detection
-			if active == 0 && completed < total && len(pendingQueue) == 0 {
+			// Deadlock detection — read completed under lock (M4)
+			r.mu.RLock()
+			currentCompleted := r.completed
+			r.mu.RUnlock()
+			if active == 0 && currentCompleted < total && len(pendingQueue) == 0 {
 				r.mu.Lock()
 				for _, n := range r.graph.Nodes {
 					if _, done := r.results[n.Step.Name]; !done {
@@ -199,7 +212,7 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 							Status: model.NodeAborted,
 							Error:  fmt.Errorf("deadlock: no runnable nodes but DAG not finished"),
 						}
-						completed++
+						r.completed++
 					}
 				}
 				r.mu.Unlock()
@@ -237,6 +250,15 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 // executeNode runs a single step with preconditions, retries, and timeout.
 func (r *Runner) executeNode(ctx context.Context, node *dag.Node) model.NodeResult {
 	step := node.Step
+
+	// Inherit DAG-level defaults if not set at step level
+	if step.Shell == "" && r.dag.Shell != "" {
+		step.Shell = r.dag.Shell
+	}
+	if step.WorkingDir == "" && r.dag.WorkingDir != "" {
+		step.WorkingDir = r.dag.WorkingDir
+	}
+
 	nr := model.NodeResult{
 		Name:      step.Name,
 		StartedAt: time.Now(),
@@ -342,9 +364,16 @@ func (r *Runner) evalPreconditions(ctx context.Context, step model.Step) bool {
 			continue
 		}
 
-		shell := "sh"
-		if runtime.GOOS == "windows" {
-			shell = "cmd"
+		shell := step.Shell
+		if shell == "" {
+			shell = r.dag.Shell
+		}
+		if shell == "" {
+			if runtime.GOOS == "windows" {
+				shell = "cmd"
+			} else {
+				shell = "sh"
+			}
 		}
 
 		cmdExec := executor.CommandExecutor{}
@@ -451,7 +480,8 @@ func (r *Runner) shouldSkip(name string) bool {
 }
 
 // cascadeSkip recursively skips all downstream dependents.
-func (r *Runner) cascadeSkip(name string, completed *int) {
+// Uses r.completed protected by r.mu (H3/M4).
+func (r *Runner) cascadeSkip(name string) {
 	dependents := r.graph.Dependents[name]
 	for _, depName := range dependents {
 		r.mu.Lock()
@@ -460,9 +490,9 @@ func (r *Runner) cascadeSkip(name string, completed *int) {
 				Name:   depName,
 				Status: model.NodeSkipped,
 			}
-			*completed++
+			r.completed++
 			r.mu.Unlock()
-			r.cascadeSkip(depName, completed)
+			r.cascadeSkip(depName)
 		} else {
 			r.mu.Unlock()
 		}
@@ -491,13 +521,18 @@ func (r *Runner) runHandlers(ctx context.Context, status model.NodeStatus) {
 }
 
 // runHandler executes a single lifecycle handler step.
+// Logs errors to stderr instead of silently swallowing them (M9).
 func (r *Runner) runHandler(ctx context.Context, step model.Step) {
 	execType := step.ResolveType()
 	exec, err := executor.New(execType)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "handler %q: failed to create executor: %v\n", step.Name, err)
 		return
 	}
-	exec.Execute(ctx, step, r.buildStepEnv(step))
+	result := exec.Execute(ctx, step, r.buildStepEnv(step))
+	if result.Error != nil {
+		fmt.Fprintf(os.Stderr, "handler %q: execution error: %v\n", step.Name, result.Error)
+	}
 }
 
 // GetResults returns the current results snapshot.
