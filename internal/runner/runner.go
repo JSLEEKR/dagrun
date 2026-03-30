@@ -200,10 +200,12 @@ func (r *Runner) Run(ctx context.Context) model.DAGResult {
 			}
 
 			// Deadlock detection — read completed under lock (M4)
+			// Also check that no pending events exist in doneCh or readyCh
+			// to avoid false positives when multiple goroutines finish simultaneously.
 			r.mu.RLock()
 			currentCompleted := r.completed
 			r.mu.RUnlock()
-			if active == 0 && currentCompleted < total && len(pendingQueue) == 0 {
+			if active == 0 && currentCompleted < total && len(pendingQueue) == 0 && len(doneCh) == 0 && len(readyCh) == 0 {
 				r.mu.Lock()
 				for _, n := range r.graph.Nodes {
 					if _, done := r.results[n.Step.Name]; !done {
