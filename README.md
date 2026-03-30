@@ -1,8 +1,8 @@
 # dagrun
 
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-168-blue?style=for-the-badge)](https://github.com/JSLEEKR/dagrun)
+[![Tests](https://img.shields.io/badge/Tests-146-blue?style=for-the-badge)](https://github.com/JSLEEKR/dagrun)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen?style=for-the-badge)](go.mod)
 
 A lightweight DAG (Directed Acyclic Graph) workflow runner for defining and executing multi-step workflows with dependency resolution. Define workflows in YAML, and dagrun handles parallel execution, dependency ordering, retries, and error propagation.
@@ -82,7 +82,7 @@ dagrun run hello.yaml
 Output:
 
 ```
-=== DAG "hello-world": succeeded (total=3 succeeded=3 failed=0 skipped=0 duration=15ms) ===
+=== DAG "hello-world": succeeded (total=3 succeeded=3 failed=0 skipped=0 aborted=0 duration=15ms) ===
 
   [OK] greet (succeeded, 5ms)
   [OK] timestamp (succeeded, 6ms)
@@ -578,7 +578,6 @@ When using `-json` flag, results are output as structured JSON:
 - Git sync
 - 19+ executor types (keeping only 3)
 - 60+ external dependencies (keeping 0)
-- 60+ external dependencies
 
 ### What dagrun improves
 - **Zero dependencies**: Go stdlib only
